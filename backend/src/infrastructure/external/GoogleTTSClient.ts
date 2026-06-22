@@ -3,9 +3,9 @@ import path from 'node:path';
 import type { FastifyBaseLogger } from 'fastify';
 import type { SynthesizeResult } from './PiperClient.js';
 
-const VOICES: Record<string, { languageCode: string; name: string }> = {
-  en: { languageCode: 'en-US', name: 'en-US-Neural2-F' },
-  ur: { languageCode: 'ur-PK', name: 'ur-PK-Standard-A' },
+const VOICES: Record<string, { languageCode: string; name?: string; gender: string }> = {
+  en: { languageCode: 'en-US', name: 'en-US-Neural2-F', gender: 'FEMALE' },
+  ur: { languageCode: 'ur-PK', gender: 'FEMALE' },
 };
 
 export class GoogleTTSClient {
@@ -29,7 +29,10 @@ export class GoogleTTSClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         input: { text },
-        voice: { languageCode: voice.languageCode, name: voice.name },
+        voice: {
+          languageCode: voice.languageCode,
+          ...(voice.name ? { name: voice.name } : { ssmlGender: voice.gender }),
+        },
         audioConfig: { audioEncoding: 'LINEAR16', sampleRateHertz: 8000 },
       }),
       signal: AbortSignal.timeout(15_000),
