@@ -1,0 +1,34 @@
+{
+  "name": "ai-voicebot-backend",
+  "version": "1.0.0",
+  "description": "AI VoiceBot backend — Fastify + TypeScript",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "lint": "eslint src --ext .ts"
+  },
+  "dependencies": {
+    "@fastify/multipart": "^8.3.0",
+    "@fastify/static": "^7.0.4",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.28.1",
+    "pg": "^8.21.0",
+    "pino": "^9.3.1",
+    "pino-pretty": "^11.2.1",
+    "ssh2": "^1.17.0",
+    "uuid": "^10.0.0",
+    "ws": "^8.21.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.20.0",
+    "@types/ssh2": "^1.15.5",
+    "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.17.0",
+    "typescript": "^5.5.4"
+  }
+}
