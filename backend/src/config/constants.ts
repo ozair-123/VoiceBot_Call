@@ -36,6 +36,9 @@ BEHAVIOUR RULES:
 - To transfer: say "Let me connect you with one of our team members."`;
 
 
+export const GREETING_EN = "Welcome to The Executive Centre. How may I assist you today?";
+export const GREETING_UR = "ایگزیکٹو سینٹر میں خوش آمدید۔ میں آپ کی کیسے مدد کر سکتا ہوں؟";
+
 export const TRANSFER_PHRASE = "Let me connect you with one of our team members.";
 
 export const ESCALATION_KEYWORDS = [

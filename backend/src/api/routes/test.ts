@@ -66,7 +66,7 @@ export const testRoutes: FastifyPluginAsync<{ container: Container }> = async (a
 
   // POST /api/test/text — send text directly, get LLM + TTS response
   app.post('/text', async (req, reply) => {
-    const { text } = req.body as { text?: string };
+    const { text, language = 'en' } = req.body as { text?: string; language?: string };
     if (!text?.trim()) return reply.status(400).send({ error: 'text field required' });
 
     const llmStart = Date.now();
@@ -82,7 +82,7 @@ export const testRoutes: FastifyPluginAsync<{ container: Container }> = async (a
     let audioUrl = null;
     let ttsDurationMs = 0;
     try {
-      const ttsResult = await container.ttsService.synthesize(response);
+      const ttsResult = await container.ttsService.synthesize(response, language);
       audioUrl = `/api/audio/files/${container.ttsService.getRelativeFilename(ttsResult.audioPath)}`;
       ttsDurationMs = ttsResult.durationMs;
     } catch (err) {
@@ -90,5 +90,20 @@ export const testRoutes: FastifyPluginAsync<{ container: Container }> = async (a
     }
 
     return reply.send({ input: text, response, audioUrl, timings: { llmMs: llmDurationMs, ttsMs: ttsDurationMs } });
+  });
+
+  // POST /api/test/tts — test TTS directly without LLM
+  app.post('/tts', async (req, reply) => {
+    const { text, language = 'en' } = req.body as { text?: string; language?: string };
+    if (!text?.trim()) return reply.status(400).send({ error: 'text field required' });
+
+    try {
+      const ttsResult = await container.ttsService.synthesize(text, language);
+      const audioUrl = `/api/audio/files/${container.ttsService.getRelativeFilename(ttsResult.audioPath)}`;
+      return reply.send({ text, language, audioUrl, ttsMs: ttsResult.durationMs });
+    } catch (err) {
+      app.log.error({ err }, 'TTS error during test');
+      return reply.status(500).send({ error: String(err) });
+    }
   });
 };

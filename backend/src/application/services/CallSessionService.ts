@@ -9,6 +9,7 @@ import type { TTSService } from './TTSService.js';
 import type { LLMService, ChatMessage } from './LLMService.js';
 import type { QueueTransferService } from './QueueTransferService.js';
 import type { CallOutcome } from '../../domain/entities/Call.js';
+import { GREETING_EN, GREETING_UR } from '../../config/constants.js';
 
 interface CallSession {
   callId: string;
@@ -61,7 +62,8 @@ export class CallSessionService {
 
     try {
       await call.answer();
-      await this.playTTS(call, 'Hello, thank you for calling. How can I help you today?');
+      await this.playTTS(call, GREETING_EN, 'en');
+      await this.playTTS(call, GREETING_UR, 'ur');
 
       while (session.active) {
         const recordingBase = `voicebot-${callId}-${Date.now()}`;
