@@ -91,7 +91,10 @@ export class CallSessionService {
           transcript = sttResult.text;
           sttDurationMs = sttResult.durationMs;
           confidence = this.scoreConfidence(transcript);
-          if (sttResult.language) session.language = sttResult.language;
+          if (sttResult.language) {
+            // Whisper often detects Urdu as Hindi — treat both as Urdu
+            session.language = sttResult.language === 'hi' ? 'ur' : sttResult.language;
+          }
           this.logger.info({ transcript, confidence, sttDurationMs, language: session.language }, 'STT complete');
         } catch (err) {
           this.logger.error({ err }, 'STT failed');

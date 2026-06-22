@@ -19,7 +19,7 @@ export class TTSService {
   async synthesize(text: string, language = 'en'): Promise<SynthesizeResult> {
     const filename = `tts-${uuidv4()}.wav`;
     const backend = language === 'ur' ? this.urduBackend : this.englishBackend;
-    const provider = language === 'ur' ? 'azure' : 'elevenlabs';
+    const provider = backend.constructor.name.replace('Client', '').toLowerCase();
 
     this.logger.info({ textLength: text.length, filename, language, provider }, 'Starting TTS synthesis');
     const result = await backend.synthesize(text, filename, language);
