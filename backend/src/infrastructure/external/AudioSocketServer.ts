@@ -60,10 +60,12 @@ export class AudioSocketServer extends EventEmitter {
   }
 
   private handleConnection(socket: net.Socket): void {
+    this.logger.info({ remote: `${socket.remoteAddress}:${socket.remotePort}` }, 'AudioSocket TCP connection received');
     let buffer = Buffer.alloc(0);
     let session: AudioSocketSession | null = null;
 
     socket.on('data', (chunk: Buffer) => {
+      this.logger.info({ bytes: chunk.length }, 'AudioSocket data received');
       buffer = Buffer.concat([buffer, chunk]);
 
       while (buffer.length >= 3) {
