@@ -49,32 +49,32 @@ export class DeepgramVoiceAgentClient extends EventEmitter {
 
   private onOpen(): void {
     const settings = {
-      type: 'SettingsConfiguration',
+      type: 'Settings',
       audio: {
         input:  { encoding: 'linear16', sample_rate: 8000 },
         output: { encoding: 'linear16', sample_rate: 8000, container: 'none' },
       },
       agent: {
-        listen: { model: 'nova-3' },
+        listen: {
+          provider: { type: 'deepgram', model: 'nova-3' },
+        },
         think: {
           provider: {
             type: 'open_ai',
-            api_key: this.openAIApiKey,
+            model: this.llmModel,
+            temperature: 0.7,
           },
-          model: this.llmModel,
-          instructions: SYSTEM_PROMPT,
+          prompt: SYSTEM_PROMPT,
           functions: [{
             name: 'transfer_to_agent',
             description: 'Transfer the caller to a human agent. Use this when the caller asks for a human, seems frustrated, or when you cannot confidently answer their question.',
             parameters: { type: 'object', properties: {} },
           }],
         },
-        speak: { model: this.ttsModel },
-      },
-      // Inject greeting as prior assistant message so the agent doesn't re-greet
-      context: {
-        messages: [{ role: 'assistant', content: GREETING_EN }],
-        replay: true,
+        speak: {
+          provider: { type: 'deepgram', model: this.ttsModel },
+        },
+        greeting: GREETING_EN,
       },
     };
 
@@ -124,7 +124,8 @@ export class DeepgramVoiceAgentClient extends EventEmitter {
         this.logger.info({ type: msg.type }, 'Deepgram VA ready');
         break;
       case 'Error':
-        this.logger.error({ msg }, 'Deepgram VA error event');
+        this.logger.error({ deepgramError: JSON.stringify(msg) }, 'Deepgram VA error event');
+        this.emit('close');
         break;
     }
   }
