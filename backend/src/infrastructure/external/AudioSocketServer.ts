@@ -64,8 +64,16 @@ export class AudioSocketServer extends EventEmitter {
     let buffer = Buffer.alloc(0);
     let session: AudioSocketSession | null = null;
 
+    let firstChunk = true;
     socket.on('data', (chunk: Buffer) => {
-      this.logger.info({ bytes: chunk.length }, 'AudioSocket data received');
+      if (firstChunk) {
+        firstChunk = false;
+        this.logger.info({
+          bytes: chunk.length,
+          firstByte: `0x${chunk[0]!.toString(16).padStart(2, '0')}`,
+          secondThirdBytes: `${chunk[1]!.toString(16).padStart(2, '0')}${chunk[2]!.toString(16).padStart(2, '0')}`,
+        }, 'AudioSocket FIRST chunk');
+      }
       buffer = Buffer.concat([buffer, chunk]);
 
       while (buffer.length >= 3) {
@@ -92,12 +100,15 @@ export class AudioSocketServer extends EventEmitter {
             break;
           }
           case 0x10: // Audio payload
+            if (!session) this.logger.warn('Audio packet received before UUID — no session yet');
             session?.emit('audio', payload);
             break;
           case 0x01: // Hangup
             session?.emit('hangup');
             session = null;
             break;
+          default:
+            this.logger.warn({ kind: `0x${kind.toString(16).padStart(2, '0')}`, length }, 'Unknown AudioSocket packet kind');
         }
       }
     });
