@@ -34,7 +34,7 @@ export class DeepgramVoiceAgentClient extends EventEmitter {
   }
 
   connect(): void {
-    this.ws = new WebSocket('wss://agent.deepgram.com/agent', {
+    this.ws = new WebSocket('wss://agent.deepgram.com/v1/agent', {
       headers: { Authorization: `Token ${this.apiKey}` },
     });
 
