@@ -34,7 +34,7 @@ export class AudioSocketSession extends EventEmitter {
     if (this.closed) return;
     this.closed = true;
     const header = Buffer.allocUnsafe(3);
-    header[0] = 0x01;
+    header[0] = 0x00; // Hangup kind in Asterisk AudioSocket protocol
     header.writeUInt16BE(0, 1);
     try { this.socket.write(header); } catch {}
     this.socket.destroy();
@@ -85,8 +85,8 @@ export class AudioSocketServer extends EventEmitter {
         buffer = buffer.subarray(3 + length);
 
         switch (kind) {
-          case 0x00: {
-            // UUID message — first packet on every new call
+          case 0x01: {
+            // UUID message — first packet on every new call (Asterisk kind 0x01)
             const uuid = [
               payload.subarray(0, 4).toString('hex'),
               payload.subarray(4, 6).toString('hex'),
@@ -100,10 +100,9 @@ export class AudioSocketServer extends EventEmitter {
             break;
           }
           case 0x10: // Audio payload
-            if (!session) this.logger.warn('Audio packet received before UUID — no session yet');
             session?.emit('audio', payload);
             break;
-          case 0x01: // Hangup
+          case 0x00: // Hangup/None
             session?.emit('hangup');
             session = null;
             break;
