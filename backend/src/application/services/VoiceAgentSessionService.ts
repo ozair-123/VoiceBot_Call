@@ -53,14 +53,12 @@ export class VoiceAgentSessionService {
     // Caller audio → Deepgram
     audioSession.on('audio', (pcm: Buffer) => agent.sendAudio(pcm));
 
-    // Deepgram audio → Caller
-    let audioSentCount = 0;
+    // Deepgram audio → Caller (split into 320-byte / 20ms frames for Asterisk)
+    const FRAME_BYTES = 320;
     agent.on('audio', (pcm: Buffer) => {
-      audioSentCount++;
-      if (audioSentCount <= 3) {
-        this.logger.info({ callId, bytes: pcm.length, chunk: audioSentCount }, 'Sending audio to caller via AudioSocket');
+      for (let i = 0; i < pcm.length; i += FRAME_BYTES) {
+        audioSession.sendAudio(pcm.subarray(i, i + FRAME_BYTES));
       }
-      audioSession.sendAudio(pcm);
     });
 
     // Log every conversation turn
