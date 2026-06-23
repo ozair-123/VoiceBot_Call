@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SynergyTalk — Voice Test</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 40px 20px; }
+    h1 { font-size: 1.4rem; font-weight: 600; color: #fff; margin-bottom: 6px; }
+    p.sub { color: #64748b; font-size: 0.9rem; margin-bottom: 24px; }
+    #chat { width: 100%; max-width: 600px; display: flex; flex-direction: column; gap: 12px; margin-bottom: 28px; min-height: 160px; }
+    .msg { padding: 12px 16px; border-radius: 12px; max-width: 85%; font-size: 0.95rem; line-height: 1.5; }
+    .msg.user { background: #1e40af; align-self: flex-end; border-bottom-right-radius: 4px; }
+    .msg.bot  { background: #1e293b; align-self: flex-start; border-bottom-left-radius: 4px; }
+    .msg.info { background: transparent; color: #475569; font-size: 0.8rem; align-self: center; }
+    .msg.bot.streaming::after { content: '▋'; animation: blink 0.7s infinite; }
+    @keyframes blink { 0%,100%{opacity:1}50%{opacity:0} }
+
+    #call-btn {
+      width: 90px; height: 90px; border-radius: 50%; border: none; cursor: pointer;
+      font-size: 2rem; transition: all 0.2s;
+    }
+    #call-btn.idle     { background: #16a34a; color: white; }
+    #call-btn.active   { background: #dc2626; color: white; animation: ring 1.5s ease-in-out infinite; }
+    #call-btn.disabled { background: #334155; color: #64748b; cursor: default; }
+    @keyframes ring { 0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,.5)} 50%{box-shadow:0 0 0 16px rgba(220,38,38,0)} }
+
+    #hold-btn {
+      width: 70px; height: 70px; border-radius: 50%; border: none; cursor: pointer;
+      background: #2563eb; color: white; font-size: 1.5rem; margin-left: 16px;
+    }
+    #hold-btn.recording { background: #dc2626; }
+    #hold-btn.hidden { display: none; }
+
+    .controls { display: flex; align-items: center; justify-content: center; }
+
+    #status { margin-top: 14px; font-size: 0.85rem; color: #64748b; height: 20px; text-align: center; }
+    #vad-bar { width: 200px; height: 4px; background: #1e293b; border-radius: 2px; margin-top: 10px; overflow: hidden; }
+    #vad-fill { height: 100%; width: 0; background: #22c55e; border-radius: 2px; transition: width 0.05s; }
+    #mode-toggle { margin-bottom: 20px; display: flex; gap: 8px; }
+    .mode-btn { padding: 6px 16px; border-radius: 20px; border: 1px solid #334155; background: transparent; color: #94a3b8; cursor: pointer; font-size: 0.85rem; }
+    .mode-btn.active { background: #1e40af; border-color: #1e40af; color: white; }
+  </style>
+</head>
+<body>
+  <h1>SynergyTalk Voice Test</h1>
+  <p class="sub">Simulate a live phone call in the browser</p>
+
+  <div id="mode-toggle">
+    <button class="mode-btn active" onclick="setMode('call')">📞 Phone Call</button>
+    <button class="mode-btn" onclick="setMode('push')">🎤 Push to Talk</button>
+  </div>
+  <div style="margin-bottom:16px;display:flex;align-items:center;gap:10px;font-size:0.85rem;color:#94a3b8">
+    <span>Language:</span>
+    <select id="lang-select" style="background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:4px 10px;font-size:0.85rem">
+      <option value="en">English</option>
+      <option value="ur">Urdu</option>
+      <option value="">Auto-detect</option>
+    </select>
+  </div>
+
+  <div id="chat">
+    <div class="msg info">Press the green button to start the call</div>
+  </div>
+
+  <div class="controls">
+    <button id="call-btn" class="idle" onclick="toggleCall()">📞</button>
+    <button id="hold-btn" class="hidden" onmousedown="startHold()" onmouseup="stopHold()"
+            ontouchstart="startHold()" ontouchend="stopHold()">🎤</button>
+  </div>
+  <div id="status">Ready</div>
+  <div id="vad-bar"><div id="vad-fill"></div></div>
+
+  <script>
+    const API = window.location.origin;
+    const GREETING = "Welcome to The Executive Centre. How can I help you today?";
+    const SILENCE_THRESHOLD = 12;   // volume level (0-255) below which = silence
+    const SILENCE_DURATION  = 1200; // ms of silence before stopping recording
+
+    let mode = 'call';
+    let callActive = false;
+    let mediaRecorder = null;
+    let chunks = [];
+    let micStream = null;
+    let audioContext = null;
+    let analyser = null;
+    let vadInterval = null;
+    let silenceTimer = null;
+    let isBotSpeaking = false;
+    let isProcessing = false;
+
+    // Audio queue
+    const audioQueue = [];
+    let isPlaying = false;
+
+    function setMode(m) {
+      mode = m;
+      document.querySelectorAll('.mode-btn').forEach((b, i) => {
+        b.classList.toggle('active', (i === 0 && m === 'call') || (i === 1 && m === 'push'));
+      });
+      document.getElementById('hold-btn').classList.toggle('hidden', m === 'call');
+    }
+
+    function setStatus(text) { document.getElementById('status').textContent = text; }
+
+    function addMsg(role, text) {
+      const div = document.createElement('div');
+      div.className = `msg ${role}`;
+      div.textContent = text;
+      document.getElementById('chat').appendChild(div);
+      document.getElementById('chat').scrollTop = 99999;
+      return div;
+    }
+
+    // ── Audio queue ────────────────────────────────────────────────────────────
+    function enqueueAudio(url) {
+      audioQueue.push(url);
+      if (!isPlaying) playNext();
+    }
+
+    function playNext() {
+      if (audioQueue.length === 0) {
+        isPlaying = false;
+        isBotSpeaking = false;
+        // Auto-start listening after bot finishes (phone call mode)
+        if (callActive && mode === 'call' && !isProcessing) {
+          setStatus('Listening...');
+          startVADRecording();
+        }
+        return;
+      }
+      isPlaying = true;
+      isBotSpeaking = true;
+      const audio = new Audio(`${API}${audioQueue.shift()}`);
+      audio.onended = playNext;
+      audio.onerror = playNext;
+      audio.play().catch(playNext);
+    }
+
+    // ── Microphone / VAD ──────────────────────────────────────────────────────
+    async function getMic() {
+      if (!micStream) micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        audioContext.createMediaStreamSource(micStream).connect(analyser);
+      }
+      return micStream;
+    }
+
+    function getVolume() {
+      if (!analyser) return 0;
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      analyser.getByteFrequencyData(data);
+      return data.reduce((a, b) => a + b, 0) / data.length;
+    }
+
+    function startVADRecording() {
+      if (!micStream || isProcessing || isBotSpeaking) return;
+      chunks = [];
+      mediaRecorder = new MediaRecorder(micStream);
+      mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+      mediaRecorder.start(100);
+
+      let hasSpeech = false;
+      silenceTimer = null;
+
+      vadInterval = setInterval(() => {
+        if (!callActive) { clearInterval(vadInterval); return; }
+        const vol = getVolume();
+        document.getElementById('vad-fill').style.width = Math.min(vol * 2, 100) + '%';
+
+        if (vol > SILENCE_THRESHOLD) {
+          hasSpeech = true;
+          clearTimeout(silenceTimer);
+          silenceTimer = null;
+          setStatus('Speaking...');
+        } else if (hasSpeech && !silenceTimer) {
+          silenceTimer = setTimeout(() => {
+            stopVADAndSend();
+          }, SILENCE_DURATION);
+          setStatus('...');
+        }
+      }, 50);
+    }
+
+    function stopVADAndSend() {
+      clearInterval(vadInterval);
+      clearTimeout(silenceTimer);
+      vadInterval = null;
+      document.getElementById('vad-fill').style.width = '0';
+
+      if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
+      mediaRecorder.stop();
+      mediaRecorder.onstop = () => sendAudio(new Blob(chunks, { type: mediaRecorder.mimeType }));
+    }
+
+    // ── Phone call toggle ─────────────────────────────────────────────────────
+    async function toggleCall() {
+      if (!callActive) await startCall();
+      else endCall();
+    }
+
+    async function startCall() {
+      try {
+        await getMic();
+      } catch {
+        setStatus('Microphone access denied');
+        return;
+      }
+      callActive = true;
+      audioQueue.length = 0;
+      isPlaying = false;
+      isBotSpeaking = false;
+      isProcessing = false;
+
+      const btn = document.getElementById('call-btn');
+      btn.className = 'active';
+      btn.textContent = '📵';
+      setStatus('Connecting...');
+
+      // Play greeting
+      try {
+        const res = await fetch(`${API}/api/test/tts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: GREETING, language: 'en' }),
+        });
+        const data = await res.json();
+        if (data.audioUrl) {
+          addMsg('bot', GREETING);
+          isBotSpeaking = true;
+          const audio = new Audio(`${API}${data.audioUrl}`);
+          audio.onended = () => {
+            isBotSpeaking = false;
+            if (callActive && mode === 'call') {
+              setStatus('Listening...');
+              startVADRecording();
+            }
+          };
+          audio.play();
+          setStatus('Bot speaking...');
+        }
+      } catch {
+        setStatus('Listening...');
+        startVADRecording();
+      }
+    }
+
+    function endCall() {
+      callActive = false;
+      clearInterval(vadInterval);
+      clearTimeout(silenceTimer);
+      audioQueue.length = 0;
+      isPlaying = false;
+      isBotSpeaking = false;
+      isProcessing = false;
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+      document.getElementById('call-btn').className = 'idle';
+      document.getElementById('call-btn').textContent = '📞';
+      document.getElementById('vad-fill').style.width = '0';
+      setStatus('Call ended');
+    }
+
+    // ── Push-to-talk ─────────────────────────────────────────────────────────
+    async function startHold() {
+      await getMic();
+      chunks = [];
+      mediaRecorder = new MediaRecorder(micStream);
+      mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+      mediaRecorder.start();
+      document.getElementById('hold-btn').className = 'recording';
+      setStatus('Recording...');
+    }
+
+    function stopHold() {
+      if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
+      document.getElementById('hold-btn').className = '';
+      mediaRecorder.stop();
+      mediaRecorder.onstop = () => sendAudio(new Blob(chunks, { type: mediaRecorder.mimeType }));
+    }
+
+    // ── Send audio & handle SSE stream ────────────────────────────────────────
+    async function sendAudio(blob) {
+      isProcessing = true;
+      isBotSpeaking = false;
+      audioQueue.length = 0;
+      isPlaying = false;
+      setStatus('Transcribing...');
+
+      const form = new FormData();
+      form.append('file', blob, 'recording.webm');
+
+      let botMsg = null;
+      let botText = '';
+
+      try {
+        const lang = document.getElementById('lang-select').value;
+        const streamUrl = lang ? `${API}/api/test/stream?language=${lang}` : `${API}/api/test/stream`;
+        const response = await fetch(streamUrl, { method: 'POST', body: form });
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split('\n\n');
+          buffer = parts.pop() ?? '';
+
+          for (const part of parts) {
+            const em = part.match(/^event: (\w+)\ndata: (.+)$/s);
+            if (!em) continue;
+            let data;
+            try { data = JSON.parse(em[2]); } catch { continue; }
+            const event = em[1];
+
+            if (event === 'transcript') {
+              addMsg('user', data.text);
+              setStatus('Thinking...');
+            } else if (event === 'response_chunk') {
+              if (!botMsg) { botMsg = addMsg('bot', ''); botMsg.classList.add('streaming'); }
+              botText += (botText ? ' ' : '') + data.text;
+              botMsg.textContent = botText;
+              document.getElementById('chat').scrollTop = 99999;
+            } else if (event === 'audio') {
+              if (data.index === 0) setStatus('Bot speaking...');
+              enqueueAudio(data.url);
+            } else if (event === 'done') {
+              if (botMsg) botMsg.classList.remove('streaming');
+              isProcessing = false;
+            } else if (event === 'error') {
+              addMsg('info', '⚠ ' + data.message);
+              isProcessing = false;
+              if (callActive && mode === 'call') { setStatus('Listening...'); startVADRecording(); }
+            }
+          }
+        }
+      } catch (err) {
+        setStatus('Error — ' + err.message);
+        isProcessing = false;
+        if (callActive && mode === 'call') { setStatus('Listening...'); startVADRecording(); }
+      }
+    }
+  </script>
+</body>
+</html>

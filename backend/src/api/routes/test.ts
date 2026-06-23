@@ -6,12 +6,14 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { Container } from '../../container.js';
 
 export const testRoutes: FastifyPluginAsync<{ container: Container }> = async (app, { container }) => {
-  // POST /api/test/voice — upload a WAV, run full STT → LLM → TTS pipeline
+  // POST /api/test/voice — upload audio (WAV/WebM/any), run full STT → LLM → TTS pipeline
   app.post('/voice', async (req, reply) => {
     const data = await req.file();
     if (!data) return reply.status(400).send({ error: 'No audio file uploaded' });
 
-    const filename = `test-${uuidv4()}.wav`;
+    const mimeType = data.mimetype || 'audio/webm;codecs=opus';
+    const ext = mimeType.includes('webm') ? 'webm' : mimeType.includes('ogg') ? 'ogg' : 'wav';
+    const filename = `test-${uuidv4()}.${ext}`;
     const filePath = path.join(container.audioDir, filename);
     fs.mkdirSync(container.audioDir, { recursive: true });
 
@@ -21,7 +23,7 @@ export const testRoutes: FastifyPluginAsync<{ container: Container }> = async (a
     let transcript = '';
     let sttDurationMs = 0;
     try {
-      const sttResult = await container.sttService.transcribeFile(filePath);
+      const sttResult = await container.sttService.transcribeFile(filePath, mimeType);
       transcript = sttResult.text;
       sttDurationMs = sttResult.durationMs;
     } finally {
@@ -90,6 +92,85 @@ export const testRoutes: FastifyPluginAsync<{ container: Container }> = async (a
     }
 
     return reply.send({ input: text, response, audioUrl, timings: { llmMs: llmDurationMs, ttsMs: ttsDurationMs } });
+  });
+
+  // POST /api/test/stream?language=en — streaming voice: STT → LLM tokens → sentence TTS → SSE audio events
+  app.post('/stream', async (req, reply) => {
+    const sttLanguage = (req.query as Record<string, string>)['language'] || undefined;
+    const data = await req.file();
+    if (!data) return reply.status(400).send({ error: 'No audio file uploaded' });
+
+    const mimeType = data.mimetype || 'audio/webm;codecs=opus';
+    const ext = mimeType.includes('webm') ? 'webm' : mimeType.includes('ogg') ? 'ogg' : 'wav';
+    const filename = `test-${uuidv4()}.${ext}`;
+    const filePath = path.join(container.audioDir, filename);
+    fs.mkdirSync(container.audioDir, { recursive: true });
+    await pipeline(data.file, fs.createWriteStream(filePath));
+
+    // SSE setup
+    reply.raw.setHeader('Content-Type', 'text/event-stream');
+    reply.raw.setHeader('Cache-Control', 'no-cache');
+    reply.raw.setHeader('Connection', 'keep-alive');
+    reply.raw.setHeader('Access-Control-Allow-Origin', '*');
+    const send = (event: string, payload: object) => {
+      reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    // STT
+    let transcript = '';
+    try {
+      const sttResult = await container.sttService.transcribeFile(filePath, mimeType, sttLanguage);
+      transcript = sttResult.text;
+      container.sttService.deleteFile(filePath);
+    } catch (err) {
+      send('error', { message: 'STT failed' });
+      reply.raw.end();
+      return reply;
+    }
+
+    if (!transcript.trim()) {
+      send('error', { message: 'No speech detected' });
+      reply.raw.end();
+      return reply;
+    }
+    send('transcript', { text: transcript });
+
+    // Stream LLM tokens — buffer into sentences, generate TTS per sentence
+    let sentenceBuffer = '';
+    let audioIndex = 0;
+    let fullResponse = '';
+
+    const flushSentence = async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      fullResponse += (fullResponse ? ' ' : '') + trimmed;
+      send('response_chunk', { text: trimmed });
+      try {
+        const ttsResult = await container.ttsService.synthesize(trimmed);
+        const audioUrl = `/api/audio/files/${container.ttsService.getRelativeFilename(ttsResult.audioPath)}`;
+        send('audio', { url: audioUrl, index: audioIndex++ });
+      } catch { /* TTS error — skip this sentence */ }
+    };
+
+    try {
+      for await (const token of container.llmService.streamMessage([], transcript)) {
+        sentenceBuffer += token;
+        // Flush on sentence-ending punctuation followed by space or end
+        const match = sentenceBuffer.match(/^(.*?[.!?])\s+([\s\S]*)$/);
+        if (match) {
+          await flushSentence(match[1]!);
+          sentenceBuffer = match[2]!;
+        }
+      }
+      // Flush any remaining text
+      if (sentenceBuffer.trim()) await flushSentence(sentenceBuffer);
+    } catch (err) {
+      send('error', { message: 'LLM failed' });
+    }
+
+    send('done', { fullResponse });
+    reply.raw.end();
+    return reply;
   });
 
   // POST /api/test/tts — test TTS directly without LLM

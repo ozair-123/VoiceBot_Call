@@ -4,7 +4,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { TranscribeResult } from '../../infrastructure/external/WhisperClient.js';
 
 export interface ISTTClient {
-  transcribe(audioFilePath: string): Promise<TranscribeResult>;
+  transcribe(audioFilePath: string, mimeType?: string, language?: string): Promise<TranscribeResult>;
 }
 
 export class STTService {
@@ -14,9 +14,9 @@ export class STTService {
     private readonly logger: FastifyBaseLogger,
   ) {}
 
-  async transcribeFile(audioFilePath: string): Promise<TranscribeResult> {
+  async transcribeFile(audioFilePath: string, mimeType?: string, language?: string): Promise<TranscribeResult> {
     this.logger.info({ audioFilePath }, 'Starting transcription');
-    const result = await this.whisperClient.transcribe(audioFilePath);
+    const result = await this.whisperClient.transcribe(audioFilePath, mimeType, language);
     this.logger.info({ text: result.text, durationMs: result.durationMs }, 'Transcription done');
     return result;
   }

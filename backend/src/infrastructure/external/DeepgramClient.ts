@@ -21,21 +21,32 @@ export class DeepgramClient {
     private readonly logger: FastifyBaseLogger,
   ) {}
 
-  async transcribe(audioFilePath: string): Promise<TranscribeResult> {
+  async transcribe(audioFilePath: string, mimeType?: string, language?: string): Promise<TranscribeResult> {
     const start = Date.now();
     const fileBuffer = fs.readFileSync(audioFilePath);
+
+    const ext = audioFilePath.split('.').pop()?.toLowerCase() ?? 'wav';
+    const contentTypeMap: Record<string, string> = {
+      wav: 'audio/wav', webm: 'audio/webm;codecs=opus', ogg: 'audio/ogg',
+      mp3: 'audio/mpeg', mp4: 'audio/mp4', m4a: 'audio/mp4',
+    };
+    const contentType = mimeType ?? contentTypeMap[ext] ?? 'audio/wav';
 
     const url = new URL(this.endpoint);
     url.searchParams.set('model', this.model);
     url.searchParams.set('smart_format', 'true');
-    url.searchParams.set('detect_language', 'true');
     url.searchParams.set('punctuate', 'true');
+    if (language) {
+      url.searchParams.set('language', language);
+    } else {
+      url.searchParams.set('detect_language', 'true');
+    }
 
     const response = await fetch(url.toString(), {
       method: 'POST',
       headers: {
         'Authorization': `Token ${this.apiKey}`,
-        'Content-Type': 'audio/wav',
+        'Content-Type': contentType,
       },
       body: fileBuffer,
       signal: AbortSignal.timeout(this.timeoutMs),

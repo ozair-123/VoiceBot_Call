@@ -7,15 +7,19 @@ export class SSHFileTransferService {
   private conn: Client | null = null;
   private sftp: SFTPWrapper | null = null;
   private connecting = false;
-  private readonly privateKey: Buffer;
+  private privateKey: Buffer | null = null;
 
   constructor(
     private readonly host: string,
     private readonly username: string,
-    privateKeyPath: string,
+    private readonly privateKeyPath: string,
     private readonly logger: FastifyBaseLogger,
   ) {
-    this.privateKey = fs.readFileSync(privateKeyPath);
+    try {
+      this.privateKey = fs.readFileSync(privateKeyPath);
+    } catch {
+      this.logger.warn({ privateKeyPath }, 'SSH key not found — SSH transfers disabled (test mode)');
+    }
   }
 
   private async getSftp(): Promise<SFTPWrapper> {
@@ -25,6 +29,8 @@ export class SSHFileTransferService {
       await new Promise((r) => setTimeout(r, 50));
     }
     if (this.sftp && this.conn) return this.sftp;
+
+    if (!this.privateKey) throw new Error('SSH key not available — cannot transfer files');
 
     this.connecting = true;
     try {
@@ -42,7 +48,7 @@ export class SSHFileTransferService {
           this.sftp = null;
           this.logger.debug('SSH connection closed');
         });
-        conn.connect({ host: this.host, port: 22, username: this.username, privateKey: this.privateKey });
+        conn.connect({ host: this.host, port: 22, username: this.username, privateKey: this.privateKey! });
       });
 
       this.conn = conn;

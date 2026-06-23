@@ -3,6 +3,8 @@ import pino from 'pino';
 import { env } from './config/env.js';
 import { PostgresDatabase } from './infrastructure/database/PostgresDatabase.js';
 import { CallRepository } from './infrastructure/repositories/CallRepository.js';
+import { NoOpCallRepository } from './infrastructure/repositories/NoOpCallRepository.js';
+import type { ICallRepository } from './domain/repositories/ICallRepository.js';
 import { OpenAIClient } from './infrastructure/external/OpenAIClient.js';
 import { OllamaClient } from './infrastructure/external/OllamaClient.js';
 import { WhisperClient } from './infrastructure/external/WhisperClient.js';
@@ -18,13 +20,15 @@ import { TTSService } from './application/services/TTSService.js';
 import { AudioCacheService } from './application/services/AudioCacheService.js';
 import { QueueTransferService } from './application/services/QueueTransferService.js';
 import { CallSessionService } from './application/services/CallSessionService.js';
+import { AudioSocketServer } from './infrastructure/external/AudioSocketServer.js';
+import { VoiceAgentSessionService } from './application/services/VoiceAgentSessionService.js';
 
 export interface Container {
   logger: FastifyBaseLogger;
   audioDir: string;
 
-  db: PostgresDatabase;
-  callRepo: CallRepository;
+  db: PostgresDatabase | null;
+  callRepo: ICallRepository;
 
   openaiClient: OpenAIClient;
   ollamaClient: OllamaClient;
@@ -32,6 +36,7 @@ export interface Container {
   piperClient: PiperClient;
   agiServer: AsteriskFastAGIServer;
   sshTransfer: SSHFileTransferService;
+  audioSocketServer: AudioSocketServer;
 
   llmService: LLMService;
   sttService: STTService;
@@ -39,6 +44,7 @@ export interface Container {
   audioCache: AudioCacheService;
   transferService: QueueTransferService;
   callSessionService: CallSessionService;
+  voiceAgentService: VoiceAgentSessionService | null;
 }
 
 export async function buildContainer(): Promise<Container> {
@@ -49,10 +55,17 @@ export async function buildContainer(): Promise<Container> {
 
   const logger = pino(pinoOptions) as unknown as FastifyBaseLogger;
 
-  const db = new PostgresDatabase(env.DATABASE_URL, logger);
-  await db.migrate();
+  let db: PostgresDatabase | null = null;
+  let callRepo;
 
-  const callRepo = new CallRepository(db.getPool());
+  if (env.DATABASE_URL) {
+    db = new PostgresDatabase(env.DATABASE_URL, logger);
+    await db.migrate();
+    callRepo = new CallRepository(db.getPool());
+  } else {
+    logger.warn('DATABASE_URL not set — using in-memory repository (calls will not be persisted)');
+    callRepo = new NoOpCallRepository();
+  }
 
   const openaiClient = new OpenAIClient(env.OPENAI_API_KEY, env.OPENAI_MODEL, env.OPENAI_TIMEOUT_MS, logger);
   const ollamaClient = new OllamaClient(env.OLLAMA_BASE_URL, env.OLLAMA_MODEL, env.OLLAMA_TIMEOUT_MS, logger);
@@ -104,10 +117,28 @@ export async function buildContainer(): Promise<Container> {
     logger,
   );
 
+  // Deepgram Voice Agent path (real-time audio, no SFTP)
+  const audioSocketServer = new AudioSocketServer(logger);
+  const voiceAgentService = env.DEEPGRAM_API_KEY
+    ? new VoiceAgentSessionService(
+        audioSocketServer,
+        callRepo,
+        env.DEEPGRAM_API_KEY,
+        env.OPENAI_API_KEY,
+        env.DEEPGRAM_TTS_MODEL,
+        env.OPENAI_MODEL,
+        logger,
+      )
+    : null;
+
+  if (!voiceAgentService) {
+    logger.warn('DEEPGRAM_API_KEY not set — Voice Agent (AudioSocket) disabled, FastAGI only');
+  }
+
   return {
     logger, audioDir: env.AUDIO_DIR,
     db, callRepo,
-    openaiClient, ollamaClient, whisperClient, piperClient, agiServer, sshTransfer,
-    llmService, sttService, ttsService, audioCache, transferService, callSessionService,
+    openaiClient, ollamaClient, whisperClient, piperClient, agiServer, sshTransfer, audioSocketServer,
+    llmService, sttService, ttsService, audioCache, transferService, callSessionService, voiceAgentService,
   };
 }

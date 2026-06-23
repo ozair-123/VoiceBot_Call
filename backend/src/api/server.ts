@@ -17,10 +17,18 @@ export async function buildServer(container: Container) {
 
   await app.register(fastifyMultipart, { limits: { fileSize: 25 * 1024 * 1024 } });
 
-  // Serve TTS audio files (used during development/testing)
+  // Serve TTS audio files
   await app.register(fastifyStatic, {
     root: path.resolve(container.audioDir),
     prefix: '/api/audio/files/',
+  });
+
+  // Serve static test UI
+  const publicDir = path.resolve('public');
+  await app.register(fastifyStatic, {
+    root: publicDir,
+    prefix: '/test-ui/',
+    decorateReply: false,
   });
 
   await app.register(healthRoutes, { prefix: '/api', container });

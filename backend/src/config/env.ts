@@ -12,8 +12,8 @@ const envSchema = z.object({
   AUDIO_DIR: z.string().default('./data/audio'),
   LOCAL_TMP_DIR: z.string().default('/tmp'),
 
-  // PostgreSQL
-  DATABASE_URL: z.string().url(),
+  // PostgreSQL (optional — omit for local test mode, calls won't be persisted)
+  DATABASE_URL: z.string().url().optional(),
 
   // OpenAI
   OPENAI_API_KEY: z.string(),
@@ -47,8 +47,12 @@ const envSchema = z.object({
   // TTS (Google Cloud — English + Urdu, replaces ElevenLabs + Azure)
   GOOGLE_TTS_API_KEY: z.string().optional(),
 
-  // FastAGI server
+  // FastAGI server (legacy — kept for fallback)
   FASTAGI_PORT: z.coerce.number().default(4573),
+
+  // AudioSocket server (Deepgram Voice Agent path)
+  AUDIOSOCKET_PORT: z.coerce.number().default(9093),
+  DEEPGRAM_TTS_MODEL: z.string().default('aura-asteria-en'),
 
   // Asterisk SSH (for audio file transfer)
   AST_SSH_HOST: z.string().default('62.238.12.90'),

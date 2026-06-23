@@ -14,17 +14,24 @@ async function main() {
     process.exit(1);
   }
 
-  // Pre-generate and upload common audio phrases to Asterisk
-  await container.audioCache.warmUp();
+  // Start AudioSocket server (Deepgram Voice Agent real-time path)
+  if (container.voiceAgentService) {
+    await container.audioSocketServer.listen(env.AUDIOSOCKET_PORT);
+    app.log.info(`AudioSocket server listening on port ${env.AUDIOSOCKET_PORT}`);
+  }
 
-  // Start FastAGI TCP server (Asterisk connects here per inbound call)
+  // Start FastAGI server (legacy SFTP path — kept as fallback)
   await container.agiServer.listen();
+
+  // Pre-generate and upload common audio phrases (FastAGI path only)
+  await container.audioCache.warmUp();
 
   const shutdown = async () => {
     app.log.info('Shutting down...');
+    await container.audioSocketServer.close().catch(() => {});
     await container.agiServer.close();
     await app.close();
-    await container.db.close();
+    await container.db?.close();
     process.exit(0);
   };
 

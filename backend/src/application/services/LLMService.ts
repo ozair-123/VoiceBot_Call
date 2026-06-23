@@ -13,6 +13,16 @@ export class LLMService {
     private readonly logger: FastifyBaseLogger,
   ) {}
 
+  async *streamMessage(history: ChatMessage[], userContent: string): AsyncGenerator<string> {
+    const trimmedHistory = history.slice(-(MAX_HISTORY_EXCHANGES * 2));
+    const messages = [
+      { role: 'system' as const, content: SYSTEM_PROMPT },
+      ...trimmedHistory.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+      { role: 'user' as const, content: userContent },
+    ];
+    yield* this.openaiClient.streamChat(messages);
+  }
+
   async sendMessage(history: ChatMessage[], userContent: string): Promise<string> {
     const trimmedHistory = history.slice(-(MAX_HISTORY_EXCHANGES * 2));
 
