@@ -8,8 +8,9 @@ import type { STTService } from './STTService.js';
 import type { TTSService } from './TTSService.js';
 import type { LLMService, ChatMessage } from './LLMService.js';
 import type { QueueTransferService } from './QueueTransferService.js';
+import type { AudioCacheService } from './AudioCacheService.js';
 import type { CallOutcome } from '../../domain/entities/Call.js';
-import { GREETING_EN, GREETING_UR } from '../../config/constants.js';
+import { GREETING_EN, GREETING_UR, FILLER_PHRASE, ERROR_PHRASE } from '../../config/constants.js';
 
 interface CallSession {
   callId: string;
@@ -30,6 +31,7 @@ export class CallSessionService {
     private readonly ttsService: TTSService,
     private readonly llmService: LLMService,
     private readonly transferService: QueueTransferService,
+    private readonly audioCache: AudioCacheService,
     private readonly asteriskTmpDir: string,
     private readonly localTmpDir: string,
     private readonly logger: FastifyBaseLogger,
@@ -62,19 +64,27 @@ export class CallSessionService {
 
     try {
       await call.answer();
-      await this.playTTS(call, GREETING_EN, 'en');
-      await this.playTTS(call, GREETING_UR, 'ur');
+
+      // Play greeting — use pre-cached file if available
+      const greetingPath = this.audioCache.getRemotePath('greeting');
+      if (greetingPath) {
+        await call.streamFile(greetingPath);
+      } else {
+        await this.playTTS(call, GREETING_EN, 'en');
+        await this.playTTS(call, GREETING_UR, 'ur');
+      }
+
+      let noSpeechStreak = 0;
+      let lastTranscript = '';
 
       while (session.active) {
         const recordingBase = `voicebot-${callId}-${Date.now()}`;
         const remoteRecPath = path.posix.join(this.asteriskTmpDir, recordingBase);
         const localRecPath = path.join(this.localTmpDir, `${recordingBase}.wav`);
 
-        // Record caller's speech (Asterisk writes to its local disk)
-        await call.recordFile(remoteRecPath, 2);
+        await call.recordFile(remoteRecPath);
         if (!session.active) break;
 
-        // Fetch recording from Asterisk server to our server
         try {
           await this.sshTransfer.download(`${remoteRecPath}.wav`, localRecPath);
           this.sshTransfer.deleteRemote(`${remoteRecPath}.wav`).catch(() => {});
@@ -94,7 +104,6 @@ export class CallSessionService {
           sttDurationMs = sttResult.durationMs;
           confidence = this.scoreConfidence(transcript);
           if (sttResult.language) {
-            // Whisper often detects Urdu as Hindi — treat both as Urdu
             session.language = sttResult.language === 'hi' ? 'ur' : sttResult.language;
           }
           this.logger.info({ transcript, confidence, sttDurationMs, language: session.language }, 'STT complete');
@@ -110,24 +119,62 @@ export class CallSessionService {
           content: transcript || '(no speech)', confidence, durationMs: sttDurationMs,
         });
 
+        // No speech — transfer after 2 consecutive silent turns
         if (confidence < 0.4) {
-          this.logger.info({ callId }, 'Low confidence — transferring');
+          noSpeechStreak++;
+          if (noSpeechStreak >= 2) {
+            this.logger.info({ callId }, 'Repeated no-speech — transferring');
+            await this.transferService.transfer(call, session.history);
+            await this.endCall(session, 'no_speech');
+            return;
+          }
+          continue;
+        }
+        noSpeechStreak = 0;
+
+        // Loop detection — same question repeated
+        if (transcript === lastTranscript) {
+          this.logger.info({ callId }, 'Repeated question — transferring');
           await this.transferService.transfer(call, session.history);
-          await this.endCall(session, 'no_speech');
+          await this.endCall(session, 'transferred', 'Repeated question');
           return;
         }
+        lastTranscript = transcript;
 
-        // LLM
+        // Play filler while LLM processes — run both in parallel
+        const fillerPath = this.audioCache.getRemotePath('filler');
         let responseText = '';
-        try {
-          responseText = await this.llmService.sendMessage(session.history, transcript);
-        } catch (err) {
-          this.logger.error({ err }, 'LLM failed');
-          responseText = "I'm sorry, I'm having trouble processing your request right now.";
+
+        if (fillerPath && session.active) {
+          const [, llmResult] = await Promise.all([
+            call.streamFile(fillerPath),
+            this.llmService.sendMessage(session.history, transcript).catch((err) => {
+              this.logger.error({ err }, 'LLM failed');
+              return null as string | null;
+            }),
+          ]);
+          responseText = llmResult ?? '';
+        } else {
+          try {
+            responseText = await this.llmService.sendMessage(session.history, transcript);
+          } catch (err) {
+            this.logger.error({ err }, 'LLM failed');
+          }
+        }
+
+        // LLM error — play error message and transfer
+        if (!responseText) {
+          const errorPath = this.audioCache.getRemotePath('error');
+          if (errorPath) await call.streamFile(errorPath).catch(() => {});
+          else await this.playTTS(call, ERROR_PHRASE, 'en');
+          await this.transferService.transfer(call, session.history);
+          await this.endCall(session, 'transferred', 'LLM error');
+          return;
         }
 
         session.history.push({ role: 'user', content: transcript });
         session.history.push({ role: 'assistant', content: responseText });
+        if (session.history.length > 20) session.history.splice(0, 2);
 
         await this.callRepo.addTranscript({
           id: uuidv4(), callId, role: 'assistant', content: responseText,
@@ -140,7 +187,6 @@ export class CallSessionService {
           return;
         }
 
-        // TTS + playback
         await this.playTTS(call, responseText, session.language);
       }
 

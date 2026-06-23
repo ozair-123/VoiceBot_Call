@@ -94,16 +94,20 @@ export class AGICall extends EventEmitter {
     await this.sendCommand('ANSWER');
   }
 
-  async recordFile(filename: string, silenceSeconds = 2): Promise<void> {
-    // format=wav, escape digits="", timeout=-1 (infinite), silence detection
+  async recordFile(filename: string, silenceSeconds = 1): Promise<void> {
     await this.sendCommand(`RECORD FILE ${filename} wav "" -1 s=${silenceSeconds}`);
   }
 
-  async streamFile(filename: string): Promise<void> {
-    const res = await this.sendCommand(`STREAM FILE ${filename} ""`);
-    if (res.startsWith('200')) return;
-    // 200 result=-1 means hangup during playback — treat as hangup
-    if (res.includes('-1')) this.emit('hangup');
+  // Returns true if played fully, false if interrupted by DTMF or hangup
+  async streamFile(filename: string): Promise<boolean> {
+    const res = await this.sendCommand(`STREAM FILE ${filename} "0123456789*#"`);
+    if (res.includes('-1')) {
+      this.emit('hangup');
+      return false;
+    }
+    const match = res.match(/result=(-?\d+)/);
+    const digit = match ? parseInt(match[1]!, 10) : 0;
+    return digit === 0; // 0 = completed normally, >0 = DTMF digit pressed
   }
 
   async getVariable(name: string): Promise<string> {

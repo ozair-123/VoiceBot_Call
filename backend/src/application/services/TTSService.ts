@@ -17,10 +17,12 @@ export class TTSService {
   ) {}
 
   async synthesize(text: string, language = 'en'): Promise<SynthesizeResult> {
-    const filename = `tts-${uuidv4()}.wav`;
+    return this.synthesizeToPath(text, `tts-${uuidv4()}.wav`, language);
+  }
+
+  async synthesizeToPath(text: string, filename: string, language = 'en'): Promise<SynthesizeResult> {
     const backend = language === 'ur' ? this.urduBackend : this.englishBackend;
     const provider = backend.constructor.name.replace('Client', '').toLowerCase();
-
     this.logger.info({ textLength: text.length, filename, language, provider }, 'Starting TTS synthesis');
     const result = await backend.synthesize(text, filename, language);
     this.logger.info({ filename, durationMs: result.durationMs, provider }, 'TTS synthesis complete');

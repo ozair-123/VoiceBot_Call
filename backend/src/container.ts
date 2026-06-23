@@ -14,6 +14,7 @@ import { SSHFileTransferService } from './infrastructure/external/SSHFileTransfe
 import { LLMService } from './application/services/LLMService.js';
 import { STTService } from './application/services/STTService.js';
 import { TTSService } from './application/services/TTSService.js';
+import { AudioCacheService } from './application/services/AudioCacheService.js';
 import { QueueTransferService } from './application/services/QueueTransferService.js';
 import { CallSessionService } from './application/services/CallSessionService.js';
 
@@ -34,6 +35,7 @@ export interface Container {
   llmService: LLMService;
   sttService: STTService;
   ttsService: TTSService;
+  audioCache: AudioCacheService;
   transferService: QueueTransferService;
   callSessionService: CallSessionService;
 }
@@ -78,6 +80,7 @@ export async function buildContainer(): Promise<Container> {
   const sttService = new STTService(whisperClient, env.AUDIO_DIR, logger);
   const ttsService = new TTSService(englishTTS, urduTTS, env.AUDIO_DIR, logger);
 
+  const audioCache = new AudioCacheService(ttsService, sshTransfer, env.AUDIO_DIR, env.AST_TMP_DIR, logger);
   const transferService = new QueueTransferService(sshTransfer, ttsService, env.AST_TMP_DIR, logger);
 
   const callSessionService = new CallSessionService(
@@ -88,6 +91,7 @@ export async function buildContainer(): Promise<Container> {
     ttsService,
     llmService,
     transferService,
+    audioCache,
     env.AST_TMP_DIR,
     env.LOCAL_TMP_DIR,
     logger,
@@ -97,6 +101,6 @@ export async function buildContainer(): Promise<Container> {
     logger, audioDir: env.AUDIO_DIR,
     db, callRepo,
     openaiClient, ollamaClient, whisperClient, piperClient, agiServer, sshTransfer,
-    llmService, sttService, ttsService, transferService, callSessionService,
+    llmService, sttService, ttsService, audioCache, transferService, callSessionService,
   };
 }

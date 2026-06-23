@@ -14,6 +14,9 @@ async function main() {
     process.exit(1);
   }
 
+  // Pre-generate and upload common audio phrases to Asterisk
+  await container.audioCache.warmUp();
+
   // Start FastAGI TCP server (Asterisk connects here per inbound call)
   await container.agiServer.listen();
 
