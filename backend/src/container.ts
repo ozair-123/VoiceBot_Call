@@ -6,6 +6,7 @@ import { CallRepository } from './infrastructure/repositories/CallRepository.js'
 import { OpenAIClient } from './infrastructure/external/OpenAIClient.js';
 import { OllamaClient } from './infrastructure/external/OllamaClient.js';
 import { WhisperClient } from './infrastructure/external/WhisperClient.js';
+import { DeepgramClient } from './infrastructure/external/DeepgramClient.js';
 import { PiperClient } from './infrastructure/external/PiperClient.js';
 import { ElevenLabsClient } from './infrastructure/external/ElevenLabsClient.js';
 import { GoogleTTSClient } from './infrastructure/external/GoogleTTSClient.js';
@@ -56,6 +57,12 @@ export async function buildContainer(): Promise<Container> {
   const openaiClient = new OpenAIClient(env.OPENAI_API_KEY, env.OPENAI_MODEL, env.OPENAI_TIMEOUT_MS, logger);
   const ollamaClient = new OllamaClient(env.OLLAMA_BASE_URL, env.OLLAMA_MODEL, env.OLLAMA_TIMEOUT_MS, logger);
   const whisperClient = new WhisperClient(env.WHISPER_BASE_URL, env.WHISPER_TIMEOUT_MS, logger);
+  const deepgramClient = env.DEEPGRAM_API_KEY
+    ? new DeepgramClient(env.DEEPGRAM_API_KEY, env.DEEPGRAM_MODEL, env.DEEPGRAM_TIMEOUT_MS, logger)
+    : null;
+
+  const sttClient = deepgramClient ?? whisperClient;
+  logger.info({ provider: deepgramClient ? 'deepgram' : 'whisper' }, 'STT provider selected');
   const piperClient = new PiperClient(env.PIPER_EXE_PATH, env.PIPER_MODEL_PATH, env.AUDIO_DIR, env.PIPER_TIMEOUT_MS, logger);
   const agiServer = new AsteriskFastAGIServer(env.FASTAGI_PORT, logger);
   const sshTransfer = new SSHFileTransferService(env.AST_SSH_HOST, env.AST_SSH_USER, env.AST_SSH_KEY_PATH, logger);
@@ -77,7 +84,7 @@ export async function buildContainer(): Promise<Container> {
   }, 'TTS backends selected');
 
   const llmService = new LLMService(openaiClient, logger);
-  const sttService = new STTService(whisperClient, env.AUDIO_DIR, logger);
+  const sttService = new STTService(sttClient, env.AUDIO_DIR, logger);
   const ttsService = new TTSService(englishTTS, urduTTS, env.AUDIO_DIR, logger);
 
   const audioCache = new AudioCacheService(ttsService, sshTransfer, env.AUDIO_DIR, env.AST_TMP_DIR, logger);

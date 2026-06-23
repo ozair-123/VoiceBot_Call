@@ -25,7 +25,12 @@ const envSchema = z.object({
   OLLAMA_MODEL: z.string().default('qwen2.5:3b'),
   OLLAMA_TIMEOUT_MS: z.coerce.number().default(120_000),
 
-  // STT (faster-whisper python server)
+  // STT — Deepgram (preferred) or Whisper fallback
+  DEEPGRAM_API_KEY: z.string().optional(),
+  DEEPGRAM_MODEL: z.string().default('nova-3'),
+  DEEPGRAM_TIMEOUT_MS: z.coerce.number().default(10_000),
+
+  // STT (faster-whisper python server — fallback when no Deepgram key)
   WHISPER_BASE_URL: z.string().url().default('http://localhost:8001'),
   WHISPER_TIMEOUT_MS: z.coerce.number().default(60_000),
 

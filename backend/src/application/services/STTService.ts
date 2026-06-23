@@ -1,11 +1,15 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import type { FastifyBaseLogger } from 'fastify';
-import type { WhisperClient, TranscribeResult } from '../../infrastructure/external/WhisperClient.js';
+import type { TranscribeResult } from '../../infrastructure/external/WhisperClient.js';
+
+export interface ISTTClient {
+  transcribe(audioFilePath: string): Promise<TranscribeResult>;
+}
 
 export class STTService {
   constructor(
-    private readonly whisperClient: WhisperClient,
+    private readonly whisperClient: ISTTClient,
     private readonly audioDir: string,
     private readonly logger: FastifyBaseLogger,
   ) {}
