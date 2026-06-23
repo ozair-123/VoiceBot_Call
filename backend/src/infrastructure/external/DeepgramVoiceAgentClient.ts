@@ -86,9 +86,16 @@ export class DeepgramVoiceAgentClient extends EventEmitter {
     this.audioBuffer = [];
   }
 
+  private audioChunksReceived = 0;
+
   private onMessage(data: WebSocket.RawData, isBinary: boolean): void {
     if (isBinary) {
-      this.emit('audio', data as Buffer);
+      const pcm = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
+      this.audioChunksReceived++;
+      if (this.audioChunksReceived <= 3) {
+        this.logger.info({ bytes: pcm.length, chunk: this.audioChunksReceived }, 'Deepgram audio chunk received');
+      }
+      this.emit('audio', pcm);
       return;
     }
 

@@ -54,7 +54,14 @@ export class VoiceAgentSessionService {
     audioSession.on('audio', (pcm: Buffer) => agent.sendAudio(pcm));
 
     // Deepgram audio → Caller
-    agent.on('audio', (pcm: Buffer) => audioSession.sendAudio(pcm));
+    let audioSentCount = 0;
+    agent.on('audio', (pcm: Buffer) => {
+      audioSentCount++;
+      if (audioSentCount <= 3) {
+        this.logger.info({ callId, bytes: pcm.length, chunk: audioSentCount }, 'Sending audio to caller via AudioSocket');
+      }
+      audioSession.sendAudio(pcm);
+    });
 
     // Log every conversation turn
     agent.on('conversationText', ({ role, content }: { role: string; content: string }) => {
