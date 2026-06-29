@@ -5,6 +5,7 @@ import path from 'node:path';
 import { env } from '../config/env.js';
 import { healthRoutes } from './routes/health.js';
 import { testRoutes } from './routes/test.js';
+import { internalRoutes } from './routes/internal.js';
 import type { Container } from '../container.js';
 
 export async function buildServer(container: Container) {
@@ -33,6 +34,7 @@ export async function buildServer(container: Container) {
 
   await app.register(healthRoutes, { prefix: '/api', container });
   await app.register(testRoutes, { prefix: '/api/test', container });
+  await app.register(internalRoutes, { prefix: '/internal', container });
 
   app.setErrorHandler((error, _req, reply) => {
     app.log.error(error);

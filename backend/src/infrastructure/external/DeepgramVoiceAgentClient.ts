@@ -52,7 +52,7 @@ export class DeepgramVoiceAgentClient extends EventEmitter {
       type: 'Settings',
       audio: {
         input:  { encoding: 'linear16', sample_rate: 8000 },
-        output: { encoding: 'linear16', sample_rate: 8000, container: 'none' },
+        output: { encoding: 'linear16', sample_rate: 16000, container: 'none' },
       },
       agent: {
         listen: {
